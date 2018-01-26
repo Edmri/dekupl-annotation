@@ -10,7 +10,7 @@ usage() { echo -e "Usage: $0 <Required arguments> [Optional arguments]\n\n
                   -e <normalized_counts.tsv (normalized gene counts in \"gene_expression\" directory from Dekupl-run result)>\n
                   -f <sample_conditions.tsv (design file in \"metadata\" directory from Dekupl-run result)>\n
                   -o <path to output directory>\n
-                  -i <illumina adapters (you can use the file \"adapters.fa\" supplied with the program)>\n\n
+                  -i <illumina adapters (you can use the file \"adapters.fa\" supplied with the program, \"/usr/local/bin/dekupl-annotation/adapters.fa\")>\n\n
 \tOptional arguments :\n
                   -b <path to bin/ of blast scripts (default : in \$PATH environment variable)>\n
                   -c <path to bedtools, preferentially 2.24 (default : in \$PATH environment variable)>\n
@@ -22,14 +22,15 @@ usage() { echo -e "Usage: $0 <Required arguments> [Optional arguments]\n\n
                   -s <path to samtools (default : in \$PATH environment variable)>\n
                   -n <thread number (default : 1)>\n\n
 \tResults :\n
+                  -h print help
                   - Table \"DiffContigsInfos.tsv\", summarizing for each contig, its location on the genome (if it's aligned), the neighborhood, the sequence alignment informations, and the differential expression informations\n
                   - BED file \"diff_contigs.bed\" for the visualization ; it contains useful informations from the summarization table.\n
                   
-                  - Table \"contigsPerLoci.tsv\" (only for stranded data for now) containing loci with differentially expressed contigs \n" 1>&2; exit 1;}
+                  - Table \"contigsPerLoci.tsv\" (only for stranded data for now) containing loci with differentially expressed contigs \n" 1>&2; exit 0;}
 
 [[ $# -eq 0 ]] && usage
 
-while getopts ":a:g:d:r:i:o:b:c:j:k:m:p:s:t:n:e:f:q:" opt; do
+while getopts ":a:g:d:r:i:o:b:c:j:k:m:p:s:t:n:e:f:q:h:" opt; do
   case $opt in
   
       a)
@@ -152,6 +153,10 @@ while getopts ":a:g:d:r:i:o:b:c:j:k:m:p:s:t:n:e:f:q:" opt; do
           
             ;;                        
       
+      h)
+            help=true
+            
+            ;;
       #invalid options (options not in the list)
       ######################
       
@@ -163,6 +168,8 @@ while getopts ":a:g:d:r:i:o:b:c:j:k:m:p:s:t:n:e:f:q:" opt; do
     
   esac
 done
+
+if [ ! -f "$help" ];then usage && exit 0 ;fi 
 
 ##### scripts/functions that will be used by the main script
 ############################################################
@@ -186,21 +193,39 @@ source $(dirname "$0")/getAnnotationFunctions.sh
 #we look for samtools, bedtools, blast directory, and gsnap directory
 #####################################################################
 
-#if samtools is supplied, print the version ; otherwise, we check in the $PATH environment variable ; if it's still missing, exit
-if [ "$samtools" == "" ];then samtools=$(which samtools);if [ "$samtools" == "" ];then echo "samtools not found !";exit ;else echo "samtools version is : $($samtools --version) " ; fi ; else echo -e "samtools version is : $($samtools --version)\n" ;fi
+# if the tools is supplied, print the version ; 
+# otherwise, we check in the $PATH environment variable ; 
+# if it's still missing, exit
+function getPath {
+    if [ "$1" == "" ]; then 
+        tools=$(which $2)
+        if [ "$tools" == "" ]; then 
+            echo "$2 not found !"; exit 1
+        else 
+            echo "${tools}" 
+        fi
+    else 
+        echo "$1"
+    fi
+}
+samtools=$(getPath "$samtools" "samtools")
+echo -e "samtools version is : $($samtools --version)\n"
 
-#if bedtools is supplied, print the version ; otherwise, we check in the $PATH environment variable ; if it's still missing, exit
-if [ "$bedtools" == "" ];then bedtools=$(which bedtools);if [ "$bedtools" == "" ];then echo "bedtools not found !";exit ;else echo "bedtools version is : $($bedtools -version) " ; fi ; else echo -e "bedtools version is : $($bedtools -version)\n" ;fi
+bedtools=$(getPath "$bedtools" "bedtools")
+echo -e "bedtools version is : $($bedtools -version)\n"
 
-#if blast scripts directory is supplied, print the location ; otherwise, we check in the $PATH environment variable ; if it's still missing, exit
-if [ "$ncbi_blast_loc" == "" ];then ncbi_blast_loc=$(which blastn);if [ "$ncbi_blast_loc" == "" ];then echo "blast scripts directory not found !"; exit ; else ncbi_blast_loc=$(dirname $ncbi_blast_loc);echo -e "blast scripts directory is : ${ncbi_blast_loc}\n" ; fi; else echo -e "blast scripts directory is : $ncbi_blast_loc\n" ;fi
+ncbi_blast_loc=$(getPath "$ncbi_blast_loc" "blastn")
+ncbi_blast_loc=$(dirname $ncbi_blast_loc)
 ncbi_blast_loc="${ncbi_blast_loc}/"
 ncbi_blast_loc=$(echo "$ncbi_blast_loc" |sed 's/\/\//\//g')
+echo -e "blast scripts directory is : ${ncbi_blast_loc}\n"
 
-#if gsnap directory is supplied, print the location ; otherwise, we check in the $PATH environment variable ; if it's still missing, exit
-if [ "$GSNAP_loc" == "" ];then GSNAP_loc=$(which gsnap);if [ "$GSNAP_loc" == "" ];then echo "gsnap directory not found !"; exit ; else GSNAP_loc=$(dirname $GSNAP_loc);echo -e "gsnap directory is : ${GSNAP_loc}\n" ; fi; else echo -e "gsnap directory is : $GSNAP_loc\n" ;fi
+GSNAP_loc=$(getPath "$ncbi_blast_loc" "gsnap")
+GSNAP_loc=$(dirname $GSNAP_loc)
 GSNAP_loc="${GSNAP_loc}/"
 GSNAP_loc=$(echo "$GSNAP_loc" |sed 's/\/\//\//g')
+echo -e "gsnap directory is : ${GSNAP_loc}\n"
+
 
 #if one of the useful arguments is missing, exit with the usage 
 if [ ! -f "$DEkupl_result" ] || [ ! -f "$ref_fasta" ] || [ ! -f "$diff_genes" ] || [ ! -f "$ref_annotation" ] || [ "$output_dir" == "" ] || [ ! -f "$illumina_adapters" ] || [ "$samtools" == "" ] || [ "$bedtools" == "" ] || [ "$ncbi_blast_loc" == "" ] || [ "$GSNAP_loc" == "" ] || ([ "$stranded" != "yes" ] && [ "$stranded" != "no" ]) || [ ! -f "$normalized_gene_counts" ] || [ ! -f "$design" ]; then
@@ -247,7 +272,9 @@ fi
 #output dir
 output_dir="${output_dir}/"
 output_dir=$(echo "$output_dir" | sed 's/\/\//\//g')
-if [ ! -d $output_dir ];then mkdir $output_dir || { echo "cannot create $output_dir !!" 1>&2; exit; } ;fi
+if [ ! -d $output_dir ];then 
+    mkdir $output_dir || { echo "cannot create $output_dir !!" 1>&2; exit; }
+fi
 
 #temp dir (use to store temp files after the annotation, for checkings)
 temp_dir="${output_dir}/temp_files/"
@@ -256,7 +283,8 @@ if [ ! -d $temp_dir ];then mkdir $temp_dir ;fi
 mapping_output="${temp_dir}mapping_output/"
 if [ ! -d $mapping_output ];then mkdir $mapping_output ;fi
 
-#table summarizing for each contig, its location on the genome (if it's aligned), the neighborhood, the sequence alignment informations, and the differential expression informations
+# table summarizing for each contig, its location on the genome (if it's aligned), 
+# the neighborhood, the sequence alignment informations, and the differential expression informations
 FinalTable="${output_dir}DiffContigsInfos.tsv"
 if [ -f $FinalTable ];then rm $FinalTable ;fi
 
@@ -287,7 +315,7 @@ cat ${temp_dir}diffexFileHeader.txt ${temp_dir}diffexFile.txt >${temp_dir}diffex
 ##### blast of contigs against adapters, and retain only those not matching
 ########################################################################
 
-echo -e "\n==== Filter out contigs matching in adapters ====\n"
+echo -e "\n\n==== Filter out contigs matching in adapters ====\n"
 
 echo -e "\nnumber of initial contigs $(($(wc -l ${temp_dir}OriginalFastaContigs.fa|awk '{print $1}')/2))\n"
 
@@ -330,7 +358,7 @@ if [ -f ${mapping_output}contigs.bam ];then
   
 fi
 
-echo -e "\n==== Mapping of contigs on the genome ====\n"
+echo -e "\n\n==== Mapping of contigs on the genome ====\n"
 
 echo -e "\nnumber of contigs to align : $(($(wc -l ${temp_dir}nomatch_in_adapters.fa|awk '{print $1}')/2))\n"
 
@@ -379,6 +407,7 @@ start_date=$(date)
 
 #from the alignment, get a bed and a table of the contigs with infos about the alignment
 parseBam ${mapping_output}contigs.bam $FinalTable $diff_contigs_bed $forward_contig_color $reverse_contig_color
+
 
 $samtools view -f 4 ${mapping_output}contigs.bam | LANG=en_EN sort -k1,1 | LANG=en_EN sort -u -k1,1 | awk -v start_line=$(($(wc -l $diff_contigs_bed | awk '{print $1}')+1)) 'BEGIN{a=start_line}OFS="\t"{print a,$1;a=a+1}' >${temp_dir}OriginalUnmappedContigs.txt
 
@@ -511,7 +540,7 @@ if [[ $(wc -l $diff_contigs_bed|awk '{print $1}') -gt 0 ]];then
 	########## research of antisense & neighbours + location of the contigs in the gene (UTR, exon...) ###########
 	###########################################################################################################
 
-	echo -e "\n==== research of the neighborhood of the contigs ====\n"
+	echo -e "\n\n==== research of the neighborhood of the contigs ====\n"
 
 	#genome size for bedtools 
 	$samtools view -H ${mapping_output}contigs.bam | grep -E -v "^@PG|^@HD" | awk 'OFS="\t"{print $2,$3}' | sed 's/SN\://;s/LN\://g' | LANG=en_EN sort -k1,1 >${mapping_output}genome_size.txt
@@ -525,13 +554,11 @@ if [[ $(wc -l $diff_contigs_bed|awk '{print $1}') -gt 0 ]];then
 
 
 	if [ "$stranded" == "yes" ];then 
-
 		#remark : for the last blocks of commands (in the 2nd argument of the "paste"), we use the table a[] to store the gff attributes, and we keep the result only if we have the regex "gene_name" (case insensitive)
 		paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}antisense_contigs.txt|awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') \
-		<(awk 'OFS="\t"{print $NF}' ${temp_dir}antisense_contigs.txt | awk -F';' 'OFS="\t"{print $1,$0}' | awk 'OFS="\t"{if($1=="."){$1="none";$2="none"};print}' | awk 'OFS="\t"{if($1=="none"){print}else{b="";split($2,a,";");IGNORECASE=1;for(i=1;i<=length(a);i++){if(a[i]~/^gene_name/||a[i]~/^Name/){b=a[i]}};if(b==""){b="none"};print $1,b}}' | awk 'BEGIN{IGNORECASE=1}OFS="\t"{sub("ID=","");sub("gene_name=","");sub("Name=","");print}') >${temp_dir}antisense_contigs.tmp && mv ${temp_dir}antisense_contigs.tmp ${temp_dir}antisense_contigs.txt
+		<(awk 'OFS="\t"{print $NF}' ${temp_dir}antisense_contigs.txt | awk -F';' 'OFS="\t"{print $1,$0}' | awk 'OFS="\t"{if($1=="."){$1="none";$2="none"};print}' | awk 'OFS="\t"{if($1=="none"){print}else{split($2,a,";");IGNORECASE=1;for(i=1;i<=length(a);i++){if(a[i]~/^gene_name/||a[i]~/^Name/){b=a[i]}};print $1,b}}' | awk 'BEGIN{IGNORECASE=1}OFS="\t"{sub("ID=","");sub("gene_name=","");print}') >${temp_dir}antisense_contigs.tmp && mv ${temp_dir}antisense_contigs.tmp ${temp_dir}antisense_contigs.txt
 
 	else
-
 		paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}antisense_contigs.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $NF}' ${temp_dir}antisense_contigs.txt | awk -F';' 'OFS="\t"{print "none","none"}') >${temp_dir}antisense_contigs.tmp && mv ${temp_dir}antisense_contigs.tmp ${temp_dir}antisense_contigs.txt
 
 	fi
@@ -539,7 +566,7 @@ if [[ $(wc -l $diff_contigs_bed|awk '{print $1}') -gt 0 ]];then
 	#normally, if the bed file isn't empty, you shouldn't have an empty file (because it's a "left outer join") ; if it's the case, probably there's no concordance between the genome & the annotation !
 	if [[ $(wc -l ${temp_dir}antisense_contigs.txt|awk '{print $1}') -eq 0 ]];then echo -e "\ncheck if your genome & annotation files have concordant chromosomes !\n";exit;fi
 
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}antisense_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable 
+	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}antisense_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
 
 
 	#searching sense gene (gives 2 cols in addition of the lineInSAM : Ensembl gene ID & HUGO ID)
@@ -547,17 +574,26 @@ if [[ $(wc -l $diff_contigs_bed|awk '{print $1}') -gt 0 ]];then
 
 	#remark : for the last blocks of commands (in the 2nd argument of the "paste"), we use the table a[] to store the gff attributes, and we keep the result only if we have the regex "gene_name" (case insensitive)
 	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}sense_contigs.txt|awk -F';' '{print $1}'|awk '{sub("LineInSam=","",$1);print}') \
-	<(awk 'OFS="\t"{print $NF}' ${temp_dir}sense_contigs.txt|awk -F';' 'OFS="\t"{print $1,$0}' | awk 'OFS="\t"{if($1=="."){$1="none";$2="none"};print}' | awk 'OFS="\t"{if($1=="none"){print}else{b="";split($2,a,";");IGNORECASE=1;for(i=1;i<=length(a);i++){if(a[i]~/^gene_name/||a[i]~/^Name/){b=a[i]}};if(b==""){b="none"};print $1,b}}' | awk 'BEGIN{IGNORECASE=1}OFS="\t"{sub("ID=","");sub("gene_name=","");sub("Name=","");print}') >${temp_dir}sense_contigs.tmp && mv ${temp_dir}sense_contigs.tmp ${temp_dir}sense_contigs.txt
+	<(awk 'OFS="\t"{print $NF}' ${temp_dir}sense_contigs.txt|awk -F';' 'OFS="\t"{print $1,$0}' | awk 'OFS="\t"{if($1=="."){$1="none";$2="none"};print}' | awk 'OFS="\t"{if($1=="none"){print}else{split($2,a,";");IGNORECASE=1;for(i=1;i<=length(a);i++){if(a[i]~/^gene_name/||a[i]~/^Name/){b=a[i]}};print $1,b}}' | awk 'BEGIN{IGNORECASE=1}OFS="\t"{sub("ID=","");sub("gene_name=","");print}') >${temp_dir}sense_contigs.tmp && mv ${temp_dir}sense_contigs.tmp ${temp_dir}sense_contigs.txt
 
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}sense_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
+    if [[ $(wc -l ${temp_dir}sense_contigs.txt|awk '{print $1}') -eq 0 ]];then 
+        echo -e "\nNO sense contigs\n";
+    else
+	    LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}sense_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
+    fi
+
 
 
 	#closest 5'end gene (gives 2 cols in addition of the lineInSAM : Ensembl gene ID & dist)
 	awk '{if($3=="gene"){print}}' $ref_annotation | $bedtools closest -nonamecheck -g ${mapping_output}genome_size.txt $orientation_option -io -fu -D $dist_option -t first -a $diff_contigs_bed -b - | LANG=en_EN sort -k1,1 -k2,2n | LANG=en_EN sort -u -k4,4 >${temp_dir}closest_5end.txt || { echo "searching of closest 5' gene failure (bedtools closest -io -fu )!!" 1>&2; exit; }
 
 	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}closest_5end.txt | awk -F';' '{print $1}'|awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $(NF-1)}' ${temp_dir}closest_5end.txt | awk -F';' '{print $1}' | awk '{if($1=="."){$1="none"};sub("ID=","",$1);print}') <(awk 'OFS="\t"{print $(NF-1),$NF}' ${temp_dir}closest_5end.txt | awk '{if($1=="."){$2="none"};print $2}') | awk 'OFS="\t"{if($3>0){$2="none";$3="none"}print}'>${temp_dir}closest_5end.tmp && mv ${temp_dir}closest_5end.tmp ${temp_dir}closest_5end.txt
-
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}closest_5end.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable && rm ${temp_dir}closest_5end.txt
+    
+    if [[ $(wc -l ${temp_dir}closest_5end.txt|awk '{print $1}') -eq 0 ]];then 
+        echo -e "\nNO closest 5end gene\n";
+    else
+	    LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}closest_5end.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable && rm ${temp_dir}closest_5end.txt
+    fi
 
 
 	#closest 3'end gene (gives 2 cols in addition of the lineInSAM : Ensembl gene ID & dist)
@@ -565,30 +601,47 @@ if [[ $(wc -l $diff_contigs_bed|awk '{print $1}') -gt 0 ]];then
 
 	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}closest_3end.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $(NF-1)}' ${temp_dir}closest_3end.txt | awk -F';' '{print $1}' | awk '{if($1=="."){$1="none"};sub("ID=","",$1);print}') <(awk 'OFS="\t"{print $(NF-1),$NF}' ${temp_dir}closest_3end.txt |awk '{if($1=="."){$2="none"};print $2}') | awk 'OFS="\t"{if($3<0){$2="none";$3="none"}print}'>${temp_dir}closest_3end.tmp && mv ${temp_dir}closest_3end.tmp ${temp_dir}closest_3end.txt
 
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}closest_3end.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable && rm ${temp_dir}closest_3end.txt
+    if [[ $(wc -l ${temp_dir}closest_3end.txt|awk '{print $1}') -eq 0 ]];then 
+        echo -e "\nNO closest 3end gene\n";
+    else
+	    LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}closest_3end.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable && rm ${temp_dir}closest_3end.txt
+    fi
+
 
 	#searching UTR contigs (gives 1 col in addition of the lineInSAM : T or F)
 	awk '$3 ~ "UTR"{print}' $ref_annotation| $bedtools intersect $orientation_option -a $diff_contigs_bed -b - -loj -nonamecheck | LANG=en_EN sort -k1,1 -k2,2n | LANG=en_EN sort -u -k4,4 >${temp_dir}UTR_contigs.txt || { echo "searching of contigs in UTRs failure (bedtools intersect )!!" 1>&2; exit; }
 
 	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}UTR_contigs.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $NF}' ${temp_dir}UTR_contigs.txt | awk -F';' '{if($1=="."){$1="F";print}else{print "T"}}') >${temp_dir}UTR_contigs.tmp && mv ${temp_dir}UTR_contigs.tmp ${temp_dir}UTR_contigs.txt
-
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}UTR_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable 
+    
+    if [[ $(cat ${temp_dir}UTR_contigs.txt |wc -l |awk '{print $1}') -eq 0 ]];then
+        echo "\nNO UTR in the annotation file !\n"
+    else
+  	    LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}UTR_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable 
+    fi
 
 
 	#searching exonic contigs ( gives 1 col in addition of the line_in_SAM : T or F)
-	awk '{if($3=="exon" || $3=="CDS"){print}}' $ref_annotation | $bedtools intersect $orientation_option -a $diff_contigs_bed -b - -loj -nonamecheck | LANG=en_EN sort -k1,1 -k2,2n | LANG=en_EN sort -u -k4,4 >${temp_dir}Exonic_contigs.txt || { echo "searching of contigs in exons failure (bedtools intersect )!!" 1>&2; exit; }
+	awk '{if($3=="exon"){print}}' $ref_annotation | $bedtools intersect $orientation_option -a $diff_contigs_bed -b - -loj -nonamecheck | LANG=en_EN sort -k1,1 -k2,2n | LANG=en_EN sort -u -k4,4 >${temp_dir}Exonic_contigs.txt || { echo "searching of contigs in exons failure (bedtools intersect )!!" 1>&2; exit; }
+    
+    paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}Exonic_contigs.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $NF}' ${temp_dir}Exonic_contigs.txt | awk -F';' '{if($1=="."){$1="F";print}else{print "T"}}') >${temp_dir}Exonic_contigs.tmp && mv ${temp_dir}Exonic_contigs.tmp ${temp_dir}Exonic_contigs.txt
+    
+    if [[ $(wc -l ${temp_dir}Exonic_contigs.txt|awk '{print $1}') -eq 0 ]];then 
+        echo -e "\nNO Exonic in the annotation file\n";
+    else
+	    LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}Exonic_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
+    fi
 
-	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}Exonic_contigs.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $NF}' ${temp_dir}Exonic_contigs.txt | awk -F';' '{if($1=="."){$1="F";print}else{print "T"}}') >${temp_dir}Exonic_contigs.tmp && mv ${temp_dir}Exonic_contigs.tmp ${temp_dir}Exonic_contigs.txt
-
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}Exonic_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
-	
 	
 	#searching intronic contigs ( gives 1 col in addition of the line_in_SAM : T or F)
 	awk '{if($3=="intron"){print}}' $ref_annotation | $bedtools intersect $orientation_option -a $diff_contigs_bed -b - -loj -nonamecheck | LANG=en_EN sort -k1,1 -k2,2n | LANG=en_EN sort -u -k4,4 >${temp_dir}Intronic_contigs.txt || { echo "searching of contigs in introns failure (bedtools intersect )!!" 1>&2; exit; }
-
+	
 	paste -d'\t' <(awk 'OFS="\t"{print $4}' ${temp_dir}Intronic_contigs.txt | awk -F';' '{print $1}' | awk '{sub("LineInSam=","",$1);print}') <(awk 'OFS="\t"{print $NF}' ${temp_dir}Intronic_contigs.txt | awk -F';' '{if($1=="."){$1="F";print}else{print "T"}}') >${temp_dir}Intronic_contigs.tmp && mv ${temp_dir}Intronic_contigs.tmp ${temp_dir}Intronic_contigs.txt
-
-	LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}Intronic_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
+    
+    if [[ $(wc -l ${temp_dir}Intronic_contigs.txt|awk '{print $1}') -eq 0 ]];then 
+        echo -e "\nNO Intron\n";
+    else
+        LANG=en_EN join -t $'\t' -11 -21 <(LANG=en_EN sort -k1,1 $FinalTable) <(LANG=en_EN sort -k1,1 ${temp_dir}Intronic_contigs.txt) >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable   
+    fi
 
 
 	#diff gene (gives 1 col)
@@ -654,6 +707,7 @@ cut -f 1-33,35- $FinalTable >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTab
 sed 's/assembly/contig/g' $FinalTable >${FinalTable}.tmp && mv ${FinalTable}.tmp $FinalTable
 
 
+
 ############## compute the differential usage
 #############################################
 
@@ -690,4 +744,3 @@ fi
 rm ${temp_dir}ref_annotation.tmp ${temp_dir}OriginalFastaContigs.tmp ${temp_dir}sense_contigs.txt ${temp_dir}antisense_contigs.txt ${temp_dir}Intronic_contigs.txt ${temp_dir}Exonic_contigs.txt ${temp_dir}UTR_contigs.txt
 
 echo -e "\n**** Annotation done ****\n"
-
